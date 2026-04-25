@@ -41,12 +41,20 @@ class ScrapeResult:
 def _launch(pw, headed: bool) -> BrowserContext:
     profile_dir = Path(settings.playwright_profile_dir)
     profile_dir.mkdir(parents=True, exist_ok=True)
+    # Optional proxy. Set SCRAPER_PROXY (e.g. "socks5://127.0.0.1:1080") when doing
+    # the headed login locally through an SSH dynamic forward to the VPS, so Amazon
+    # sees the VPS's IP from the initial login and binds the cookies to it.
+    proxy_url = os.environ.get("SCRAPER_PROXY")
+    proxy = {"server": proxy_url} if proxy_url else None
+    if proxy:
+        logger.info("Using proxy: %s", proxy_url)
     context = pw.chromium.launch_persistent_context(
         user_data_dir=str(profile_dir),
         headless=not headed,
         viewport={"width": 1280, "height": 900},
         locale="pt-BR",
         args=["--disable-blink-features=AutomationControlled"],
+        proxy=proxy,
     )
     return context
 
