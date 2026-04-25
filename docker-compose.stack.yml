@@ -1,0 +1,93 @@
+# Kindle Highlights — Docker Swarm stack file.
+#
+# Deploy on the manager node (after building images via deploy.sh):
+#   set -a; source .env; set +a
+#   docker stack deploy -c docker-compose.stack.yml kindle
+#
+# Prereqs on the host:
+#   - Docker Swarm initialized (docker swarm init has been run at some point)
+#   - Traefik already running and watching the external network (network_swarm_public by default)
+#   - Images kindle-api:latest and kindle-web:latest built locally (see deploy.sh)
+#   - Bind-mount source dirs created: ./data/playwright (with the Amazon session) and ./data/vapid
+#   - .env exported into the shell that runs `docker stack deploy`
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: America/Sao_Paulo
+    volumes:
+      - kindle_postgres:/var/lib/postgresql/data
+    networks:
+      - kindle_internal
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.role == manager
+
+  api:
+    image: kindle-api:latest
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      VAPID_CLAIM_EMAIL: ${VAPID_CLAIM_EMAIL}
+      WEB_URL: ${WEB_URL}
+      TZ: America/Sao_Paulo
+    volumes:
+      # The Amazon Playwright session is rsync'd here from your laptop after the first
+      # HEADED login. Keep it as a bind mount so renewals are easy.
+      - ${KINDLE_APP_DIR:-/opt/kindle-app}/data/playwright:/data/playwright
+      - kindle_vapid:/data/vapid
+    networks:
+      - kindle_internal
+      - traefik_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=${TRAEFIK_NETWORK}"
+        - "traefik.http.routers.kindle-api.rule=Host(`${API_HOST}`)"
+        - "traefik.http.routers.kindle-api.entrypoints=websecure"
+        - "traefik.http.routers.kindle-api.tls=true"
+        - "traefik.http.routers.kindle-api.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+        - "traefik.http.services.kindle-api.loadbalancer.server.port=8000"
+
+  web:
+    image: kindle-web:latest
+    networks:
+      - traefik_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=${TRAEFIK_NETWORK}"
+        - "traefik.http.routers.kindle-web.rule=Host(`${WEB_HOST}`)"
+        - "traefik.http.routers.kindle-web.entrypoints=websecure"
+        - "traefik.http.routers.kindle-web.tls=true"
+        - "traefik.http.routers.kindle-web.tls.certresolver=${TRAEFIK_CERTRESOLVER}"
+        - "traefik.http.services.kindle-web.loadbalancer.server.port=80"
+
+volumes:
+  kindle_postgres:
+    driver: local
+  kindle_vapid:
+    driver: local
+
+networks:
+  kindle_internal:
+    driver: overlay
+    attachable: true
+  traefik_public:
+    external: true
+    name: ${TRAEFIK_NETWORK}
