@@ -1,26 +1,21 @@
-FROM python:3.11-slim
+# Official Playwright image: ships with Chromium + all OS deps preinstalled,
+# avoiding the Debian-trixie vs Ubuntu-20.04 package mismatches you hit when
+# `playwright install --with-deps` runs on a vanilla python:slim base.
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    TZ=America/Sao_Paulo
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV TZ=America/Sao_Paulo
-RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
+RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    apt-get update && apt-get install -y --no-install-recommends tzdata && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
-
-# Install Playwright chromium with OS deps (needed for headless scraping inside the container).
-RUN playwright install --with-deps chromium
 
 COPY . .
 
