@@ -38,6 +38,15 @@ class ScrapeResult:
     auth_required: bool = False
 
 
+# Pin a stable UA used both during local headed login and headless scraping in the
+# container, so Amazon's session-binding heuristics see the same device on both
+# sides. Override via SCRAPER_USER_AGENT if you ever need a different fingerprint.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+
 def _launch(pw, headed: bool) -> BrowserContext:
     profile_dir = Path(settings.playwright_profile_dir)
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -46,13 +55,16 @@ def _launch(pw, headed: bool) -> BrowserContext:
     # sees the VPS's IP from the initial login and binds the cookies to it.
     proxy_url = os.environ.get("SCRAPER_PROXY")
     proxy = {"server": proxy_url} if proxy_url else None
+    user_agent = os.environ.get("SCRAPER_USER_AGENT", DEFAULT_USER_AGENT)
     if proxy:
         logger.info("Using proxy: %s", proxy_url)
+    logger.info("Using user-agent: %s", user_agent)
     context = pw.chromium.launch_persistent_context(
         user_data_dir=str(profile_dir),
         headless=not headed,
         viewport={"width": 1280, "height": 900},
         locale="pt-BR",
+        user_agent=user_agent,
         args=["--disable-blink-features=AutomationControlled"],
         proxy=proxy,
     )
@@ -66,6 +78,7 @@ def _open_notebook(page: Page) -> bool:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if SIGNIN_MARKER in page.url:
+                logger.warning("Got redirected to signin: %s", page.url)
                 return False
             # Wait for the library list to render.
             page.wait_for_selector(".kp-notebook-library-each-book", timeout=20000)
